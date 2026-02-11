@@ -14,6 +14,7 @@ public:
     explicit MapOverlay(QWidget *parent = nullptr)
         : QWidget(parent),pos{0,0},bname() {}
     ~MapOverlay() {}
+    void drawOverlay(QPainter &painter, const QSize &size) const;
 
 public slots:
     bool event(QEvent *) Q_DECL_OVERRIDE;
@@ -43,6 +44,7 @@ public:
     void setView(qreal x, qreal z, qreal scale = 0);
     void animateView(qreal x, qreal z, qreal scale);
     void zoom(qreal factor);
+    QImage renderToImage(const QSize &size, bool withOverlay);
 
     // animation
     qreal x_src, z_src, s_src;
@@ -117,6 +119,8 @@ private:
     bool sshow[D_STRUCT_NUM];
     LayerOpt lopt;
     Config config;
+protected:
+    void drawMap(QPainter &painter, int w, int h, qreal fx, qreal fz, qreal blocks2pix) const;
 };
 
 #endif // MAPVIEW_H

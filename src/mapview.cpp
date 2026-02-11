@@ -17,6 +17,8 @@
 
 #include <math.h>
 
+static qreal clampimax(qreal x, bool *ok = nullptr);
+
 bool MapOverlay::event(QEvent *e)
 {
     if (e->type() == QEvent::MouseMove)
@@ -24,14 +26,37 @@ bool MapOverlay::event(QEvent *e)
     return QWidget::event(e);
 }
 
+// void MapOverlay::paintEvent(QPaintEvent *)
+// {
+//     QPainter painter(this);
+//     QString s = bname + QString::asprintf(" [%d,%d]", pos.x, pos.z);
+//     QRect r = painter.fontMetrics()
+//             .boundingRect(0, 0, width(), height(), Qt::AlignRight | Qt::AlignTop, s);
+
+//     painter.fillRect(r, QBrush(QColor(0, 0, 0, 128), Qt::SolidPattern));
+//     painter.setPen(Qt::white);
+//     painter.drawText(r, s);
+// }
+
 void MapOverlay::paintEvent(QPaintEvent *)
 {
     QPainter painter(this);
-    QString s = bname + QString::asprintf(" [%d,%d]", pos.x, pos.z);
-    QRect r = painter.fontMetrics()
-            .boundingRect(0, 0, width(), height(), Qt::AlignRight | Qt::AlignTop, s);
+    drawOverlay(painter, size());
+}
 
-    painter.fillRect(r, QBrush(QColor(0, 0, 0, 128), Qt::SolidPattern));
+void MapOverlay::drawOverlay(QPainter &painter, const QSize &size) const
+{
+    QString s = bname + QString::asprintf(" [%d,%d]", pos.x, pos.z);
+
+    QRect r = painter.fontMetrics().boundingRect(
+        0, 0,
+        size.width(),
+        size.height(),
+        Qt::AlignRight | Qt::AlignTop,
+        s
+    );
+
+    painter.fillRect(r, QColor(0, 0, 0, 128));
     painter.setPen(Qt::white);
     painter.drawText(r, s);
 }
@@ -124,6 +149,38 @@ void MapView::setSeed(WorldInfo wi, int dim, LayerOpt lopt)
     }
     settingsToWorld();
     update(2);
+}
+
+void MapView::drawMap(QPainter &painter, int w, int h, qreal fx, qreal fz, qreal blocks2pix) const
+{
+    if (world)
+        world->draw(painter, w, h, fx, fz, blocks2pix);
+    else
+        painter.fillRect(0, 0, w, h, palette().color(QPalette::Dark));
+}
+
+QImage MapView::renderToImage(const QSize &size, bool withOverlay)
+{
+    QImage img(size, QImage::Format_ARGB32);
+    img.fill(palette().color(QPalette::Dark));
+
+    QPainter painter(&img);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    qreal fx = getX();
+    qreal fz = getZ();
+    bool ok;
+    fx = clampimax(fx, &ok);
+    if (!ok) focusx = fx;
+    fz = clampimax(fz, &ok);
+    if (!ok) focusz = fz;
+
+    drawMap(painter, size.width(), size.height(), fx, fz, blocks2pix);
+
+    if (withOverlay && overlay)
+        overlay->drawOverlay(painter, size);
+
+    return img;
 }
 
 void MapView::setView(qreal x, qreal z, qreal scale)
@@ -316,7 +373,7 @@ qreal MapView::getZ()
     return fz;
 }
 
-static qreal clampimax(qreal x, bool *ok = nullptr)
+static qreal clampimax(qreal x, bool *ok)
 {
     const double imax = INT_MAX - 1024.0;
     if (x < -imax) x = -imax;
@@ -497,7 +554,7 @@ void MapView::paintEvent(QPaintEvent *)
 
     if (world)
     {
-        world->draw(painter, width(), height(), fx, fz, blocks2pix);
+        drawMap(painter, width(), height(), fx, fz, blocks2pix);
 
         QPoint cur = mapFromGlobal(QCursor::pos());
         qreal bx = (cur.x() -  width()/2.0) / blocks2pix + fx;

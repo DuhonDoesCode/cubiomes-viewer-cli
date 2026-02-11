@@ -1,6 +1,8 @@
 #include "aboutdialog.h"
+#include "config.h"
 #include "headless.h"
 #include "mainwindow.h"
+#include "mapview.h"
 
 #include "cubiomes/util.h"
 
@@ -9,6 +11,10 @@
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QStandardPaths>
+
+#include <cstdlib>
+#include <cstring>
+#include <string>
 
 extern "C"
 int getStructureConfig_override(int stype, int mc, StructureConfig *sconf)
@@ -37,6 +43,11 @@ int main(int argc, char *argv[])
     bool clear = false;
     bool reset = false;
     bool usage = false;
+    uint64_t seed = 0;
+    int exportWidth = 1024;
+    int exportHeight = 1024;
+    float zoom = 1.0;
+    QString exportpath;
     QString sessionpath;
     QString resultspath;
 
@@ -52,14 +63,32 @@ int main(int argc, char *argv[])
             reset = true;
         else if (strncmp(argv[i], "--session=", 10) == 0)
             sessionpath = argv[i] + 10;
-        else if (strncmp(argv[i], "--session", 9) == 0 && i+1 < argc)
+        else if (strcmp(argv[i], "--session") == 0 && i+1 < argc)
             sessionpath = argv[++i];
         else if (strncmp(argv[i], "--out=", 6) == 0)
             resultspath = argv[i] + 6;
-        else if (strncmp(argv[i], "--out", 5) == 0 && i+1 < argc)
+        else if (strcmp(argv[i], "--out") == 0 && i+1 < argc)
             resultspath = argv[++i];
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
             usage = true;
+        else if (strncmp(argv[i], "--export=", 9) == 0)
+            exportpath = argv[i] + 9;
+        else if (strcmp(argv[i], "--export") == 0 && i+1 < argc)
+            exportpath = argv[++i];
+        else if (strncmp(argv[i], "--seed=", 7) == 0)
+            seed = (uint64_t)strtoll(argv[i] + 7, nullptr, 10);
+        else if (strcmp(argv[i], "--seed") == 0 && i+1 < argc)
+            seed = (uint64_t)strtoll(argv[++i], nullptr, 10);
+        else if (strncmp(argv[i], "--width=", 8) == 0)
+            exportWidth = atoi(argv[i] + 8);
+        else if (strcmp(argv[i], "--width") == 0 && i+1 < argc)
+            exportWidth = atoi(argv[++i]);
+        else if (strncmp(argv[i], "--height=", 9) == 0)
+            exportHeight = atoi(argv[i] + 9);
+        else if (strcmp(argv[i], "--height") == 0 && i+1 < argc)
+            exportHeight = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--zoom") == 0 && i+1 < argc)
+            zoom = std::__cxx11::stof(argv[++i]);
     }
 
     if (usage)
@@ -69,7 +98,11 @@ int main(int argc, char *argv[])
                 "Options:\n"
                 "      --help                 Display this help and exit.\n"
                 "      --version              Output version information and exit.\n"
-                "      --nogui                Run in headless search mode.\n"
+                "      --nogui                 Run in headless search mode.\n"
+                "      --seed=N               Set world seed (use with --export).\n"
+                "      --export=file          Render map to image and exit (requires --nogui).\n"
+                "      --width=N              Image width for export (default 1024).\n"
+                "      --height=N             Image height for export (default 1024).\n"
                 "      --reset                Discard results and reset starting seed.\n"
                 "      --reset-all            Clear settings and remove all session data.\n"
                 "      --session=file         Open this session file.\n"
@@ -108,6 +141,37 @@ int main(int argc, char *argv[])
 
     if (nogui)
     {
+        if (!exportpath.isEmpty())
+        {
+            QApplication app(argc, argv);
+            QSettings settings(APP_STRING, APP_STRING);
+            g_extgen.load(settings);
+
+            WorldInfo wi;
+            wi.reset();
+            wi.seed = seed;
+            LayerOpt lopt;
+            lopt.reset();
+
+            MapView view(nullptr);
+            view.setSeed(wi, DIM_OVERWORLD, lopt);
+            view.setView(0, 0, 16);  // center 0,0 and scale 64 blocks per unit
+
+            int w = (exportWidth > 0) ? exportWidth : 1024;
+            int h = (exportHeight > 0) ? exportHeight : 1024;
+            QSize size(w, h);
+
+            // First draw triggers world->draw(), which requests quads and starts workers.
+            // Workers run asynchronously; wait for them to finish before capturing.
+            (void) view.renderToImage(size, false);
+            view.zoom(qreal(zoom));
+            if (view.world)
+                view.world->waitForIdle();
+            QImage img = view.renderToImage(size, true);
+            if (!img.save(exportpath))
+                return 1;
+            return 0;
+        }
         QCoreApplication app(argc, argv);
         Headless headless(sessionpath, resultspath, clear, &app);
 
